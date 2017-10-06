@@ -7,4 +7,5 @@ import lombok.Setter;
 @Setter
 public class SpellDamageEntry extends SpellEntry {
     private int amount;
+    private String type;
 }

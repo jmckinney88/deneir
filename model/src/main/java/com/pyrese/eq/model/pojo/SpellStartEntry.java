@@ -1,7 +1,10 @@
 package com.pyrese.eq.model.pojo;
 
-/**
- * Created by jonathan.mckinney on 10/6/17.
- */
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
+@Setter
 public class SpellStartEntry extends SpellEntry {
+    String source;
 }
