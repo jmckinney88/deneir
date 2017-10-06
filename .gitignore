@@ -1,3 +1,6 @@
 .idea
 *.iml
 io/target
+wd
+
+application/target
