@@ -11,7 +11,7 @@
     <modules>
         <module>io</module>
         <module>application</module>
-        <module>model</module>
+        <module>parser</module>
     </modules>
 
 

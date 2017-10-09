@@ -1,12 +1,11 @@
-package com.pyrese.eq.model.pojo;
+package com.pyrese.eq.parser.events;
 
 import lombok.Getter;
 import lombok.Setter;
 
 @Getter
 @Setter
-public class WeaponEntry extends LogEntry {
+public class CombatEvent extends LogEvent {
     private String source;
     private String target;
-    private int amount;
 }

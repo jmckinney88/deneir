@@ -1,4 +1,4 @@
-package com.pyrese.eq.model.pojo;
+package com.pyrese.eq.parser.events;
 
 
 import lombok.Getter;
@@ -8,7 +8,7 @@ import java.util.Date;
 
 @Getter
 @Setter
-public class LogEntry {
+public class LogEvent {
     private String rawContent;
     private Date timestamp;
 }

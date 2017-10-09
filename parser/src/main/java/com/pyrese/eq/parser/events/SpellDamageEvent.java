@@ -1,11 +1,11 @@
-package com.pyrese.eq.model.pojo;
+package com.pyrese.eq.parser.events;
 
 import lombok.Getter;
 import lombok.Setter;
 
 @Getter
 @Setter
-public class SpellDamageEntry extends SpellEntry {
+public class SpellDamageEvent extends SpellEvent {
     private int amount;
     private String type;
 }
