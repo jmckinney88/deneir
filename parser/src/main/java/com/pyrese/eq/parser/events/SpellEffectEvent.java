@@ -6,6 +6,10 @@ import lombok.Setter;
 @Getter
 @Setter
 public class SpellEffectEvent extends SpellEvent{
-    boolean positive;
-    String effect;
+    Type type;
+
+    public enum Type {
+        gain,
+        lose
+    }
 }
