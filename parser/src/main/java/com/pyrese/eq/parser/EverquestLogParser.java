@@ -9,6 +9,7 @@ import com.pyrese.eq.parser.events.SpellEffectEvent;
 import com.pyrese.eq.parser.events.SpellEvent;
 import com.pyrese.io.TailInputStream;
 
+import java.awt.*;
 import java.io.BufferedReader;
 import java.io.Closeable;
 import java.io.File;
@@ -16,10 +17,17 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.text.DateFormat;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -71,6 +79,13 @@ public class EverquestLogParser implements Closeable {
                 throw new IllegalArgumentException("Unexpected mode: " + mode);
         }
         listeners = ConcurrentHashMap.newKeySet();
+        rawInputQueue = new ConcurrentLinkedQueue<>();
+        streamReadingWorker = new StreamReadingWorker(logInputStream, rawInputQueue);
+        queueReadingWorker = new QueueReadingWorker(rawInputQueue, listeners);
+        Thread queueReaderThread = new Thread(queueReadingWorker);
+        queueReaderThread.start();
+        Thread streamReaderThread = new Thread(streamReadingWorker);
+        streamReaderThread.start();
     }
 
     /**
@@ -100,7 +115,7 @@ public class EverquestLogParser implements Closeable {
     private static class StreamReadingWorker implements Runnable {
 
         private InputStream logInputStream;
-        private ConcurrentLinkedQueue<String> rawInputQueue;
+        private final ConcurrentLinkedQueue<String> rawInputQueue;
         private boolean stop = false;
 
         public StreamReadingWorker(InputStream logInputStream, ConcurrentLinkedQueue<String> rawInputQueue){
@@ -128,6 +143,9 @@ public class EverquestLogParser implements Closeable {
             while(!stop) {
                 try {
                     rawInputQueue.add(reader.readLine());
+                    synchronized (rawInputQueue) {
+                        rawInputQueue.notifyAll();
+                    }
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
@@ -145,7 +163,7 @@ public class EverquestLogParser implements Closeable {
      */
     private static class QueueReadingWorker implements Runnable {
 
-        private ConcurrentLinkedQueue<String> rawInputQueue;
+        private final ConcurrentLinkedQueue<String> rawInputQueue;
         private Set<LogEventListener> listeners;
         private boolean stop = false;
 
@@ -172,9 +190,19 @@ public class EverquestLogParser implements Closeable {
         public void run() {
             EventFactory logEventFactory = new EventFactory();
             while(!stop){
-                for(String rawContent : rawInputQueue){
-                    LogEvent event = logEventFactory.parseLogString(rawContent);
-                    broadcastEvent(event);
+                while(!rawInputQueue.isEmpty()) {
+                    String rawContent = rawInputQueue.poll();
+                    List<LogEvent> events = logEventFactory.parseLogString(rawContent);
+                    for(LogEvent event : events) {
+                        broadcastEvent(event);
+                    }
+                }
+                try {
+                    synchronized (rawInputQueue) {
+                        rawInputQueue.wait();
+                    }
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
                 }
             }
         }
@@ -208,6 +236,9 @@ public class EverquestLogParser implements Closeable {
         protected final void onAny(LogEvent event){
             for(LogEventListener listener : listeners){
                 if(listener.onAny() != null){
+                    //TODO: These calls should be spun off into other threads to avoid handlers blocking processing.
+                    //TODO: Handlers will need to check the timestamp as FIFO will not be guaranteed with the multithreaded handling.
+                    //TODO: Is this worthwhile?
                     listener.onAny().accept(event);
                 }
             }
@@ -272,11 +303,137 @@ public class EverquestLogParser implements Closeable {
 
     private static class EventFactory {
 
-        Map<Pattern, Class<? extends LogEvent>> eventMap
 
+        List<EventPatternFactory> eventPatternFactories = new ArrayList<>();
+        EventPatternFactory unknownFactory;
 
-        public LogEvent parseLogString(String logString){
+        public EventFactory() {
+            eventPatternFactories.add(new LocationEventFactory());
+            eventPatternFactories.add(new EnterZoneEventFactory());
+            unknownFactory = new UnknownEventFactory();
+        }
 
+        public List<LogEvent> parseLogString(String logString){
+            boolean handled = false;
+            List<LogEvent> list = new ArrayList<>();
+            for(EventPatternFactory eventPatternFactory : eventPatternFactories) {
+                if(eventPatternFactory.isMatch(logString)){
+                    try {
+                        list.add(eventPatternFactory.parseLogString(logString));
+                        handled = true;
+                    } catch (ParseException e) {
+                        e.printStackTrace(); //todo: Logging
+                    }
+                }
+            }
+            if(!handled) {
+                try {
+                    list.add(unknownFactory.parseLogString(logString));
+                } catch (Exception e) {
+                    System.err.println("Failed parsing line: " + logString);
+                    e.printStackTrace(); //todo: logging
+                }
+            }
+            return list;
+        }
+
+        private interface EventPatternFactory {
+            boolean isMatch(String rawContent);
+            LogEvent parseLogString(String logString) throws ParseException;
+        }
+
+        private static abstract class EventPatternFactoryImpl<T_EVENT extends LogEvent> implements
+                EventPatternFactory {
+            protected Pattern pattern;
+            private SimpleDateFormat dateFormatter;
+
+            protected EventPatternFactoryImpl() {
+                dateFormatter = new SimpleDateFormat("EEE MMM dd HH:mm:ss YYYY");
+            }
+
+            public boolean isMatch(String rawContent) {
+                return pattern.matcher(stripLogDate(rawContent)).matches();
+            }
+
+            protected Date getDateTime(String rawContent) throws ParseException {
+                String dateString = rawContent.substring(1, rawContent.indexOf("]"));
+                return dateFormatter.parse(dateString);
+            }
+
+            @Override
+            public final T_EVENT parseLogString(String logString) throws ParseException {
+                if(pattern != null) {
+                    if (!isMatch(logString)) {
+                        throw new IllegalArgumentException("Invalid logString; Must match pattern " + pattern.toString());
+                    }
+                }
+                T_EVENT event = getLogEvent();
+                event.setTimestamp(getDateTime(logString));
+                event.setRawContent(logString);
+                populateEvent(event, stripLogDate(logString));
+                return event;
+            }
+
+            private String stripLogDate(String logString) {
+                return logString.substring(logString.indexOf("]") + 2);
+            }
+
+            protected abstract void populateEvent(T_EVENT event, String logString) throws ParseException;
+
+            protected abstract T_EVENT getLogEvent();
+        }
+
+        private static class UnknownEventFactory extends EventPatternFactoryImpl<LogEvent> {
+
+            @Override
+            protected void populateEvent(LogEvent event, String logString) throws ParseException {
+                //do nothing
+            }
+
+            @Override
+            protected LogEvent getLogEvent() {
+                return new LogEvent();
+            }
+        }
+
+        private static class LocationEventFactory extends EventPatternFactoryImpl<LocationEvent> {
+
+            public LocationEventFactory(){
+                this.pattern = Pattern.compile("^Your Location is (?<Y>-?[0-9]+(\\.[0-9]*)?), (?<X>-?[0-9]+(\\.[0-9]*)?), (?<Z>-?[0-9]+(\\.[0-9]*)?)");
+            }
+
+            @Override
+            public void populateEvent(LocationEvent event, String logString) throws ParseException {
+                Matcher matcher = pattern.matcher(logString);
+                matcher.find();
+                event.setY(Double.valueOf(matcher.group("Y")));
+                event.setX(Double.valueOf(matcher.group("X")));
+                event.setZ(Double.valueOf(matcher.group("Z")));
+            }
+
+            @Override
+            protected LocationEvent getLogEvent() {
+                return new LocationEvent();
+            }
+        }
+
+        private static class EnterZoneEventFactory extends EventPatternFactoryImpl<EnterZoneEvent> {
+
+            public EnterZoneEventFactory(){
+                this.pattern = Pattern.compile("^You have entered (?<Zone>[a-zA-Z\\s]+).");
+            }
+
+            @Override
+            public void populateEvent(EnterZoneEvent event, String logString) throws ParseException {
+                Matcher matcher = pattern.matcher(logString);
+                matcher.find();
+                event.setZoneName(matcher.group("Zone"));
+            }
+
+            @Override
+            protected EnterZoneEvent getLogEvent() {
+                return new EnterZoneEvent();
+            }
         }
     }
 }

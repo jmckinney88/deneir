@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * Connect a PipedInputStream to receive lines of text tailed to the Listener.
@@ -24,8 +25,10 @@ public class TailerListener extends TailerListenerAdapter implements Closeable {
     @Override
     public void handle(String line) {
         try {
-            tailPublish.write((line + "\n").getBytes());
-            tailPublish.flush();
+            if(!StringUtils.isBlank(line)) {
+                tailPublish.write((line + "\n").getBytes());
+                tailPublish.flush();
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

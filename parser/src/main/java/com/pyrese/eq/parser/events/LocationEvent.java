@@ -6,7 +6,7 @@ import lombok.Setter;
 @Getter
 @Setter
 public class LocationEvent extends LogEvent {
-    int y;
-    int x;
-    int z;
+    double y;
+    double x;
+    double z;
 }
