@@ -88,6 +88,13 @@ public class EverquestLogParser implements Closeable {
         streamReaderThread.start();
     }
 
+    public void start() {
+        Thread queueReaderThread = new Thread(queueReadingWorker);
+        queueReaderThread.start();
+        Thread streamReaderThread = new Thread(streamReadingWorker);
+        streamReaderThread.start();
+    }
+
     /**
      * Add a unique LogEventListener such that any callbacks on
      * the listener will be called as documented in LogEventListener. N
