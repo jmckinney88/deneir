@@ -26,7 +26,7 @@ public class TailerListener extends TailerListenerAdapter implements Closeable {
     public void handle(String line) {
         try {
             if(!StringUtils.isBlank(line)) {
-                tailPublish.write((line + "\n").getBytes());
+                tailPublish.write((line + System.lineSeparator()).getBytes());
                 tailPublish.flush();
             }
         } catch (IOException e) {

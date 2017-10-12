@@ -9,21 +9,21 @@ import com.pyrese.eq.parser.events.SpellEffectEvent;
 import com.pyrese.eq.parser.events.SpellEvent;
 import com.pyrese.io.TailInputStream;
 
-import java.awt.*;
+import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -51,8 +51,7 @@ public class EverquestLogParser implements Closeable {
      * @throws IOException if an I/O error occurs
      */
     public void close() throws IOException {
-        streamReadingWorker.stop();
-        queueReadingWorker.stop();
+        streamToEventReader.stop();
     }
 
     public enum Mode {
@@ -60,39 +59,18 @@ public class EverquestLogParser implements Closeable {
         Tail
     }
 
-    private InputStream logInputStream;
-    private ConcurrentLinkedQueue<String> rawInputQueue;
     private Set<LogEventListener> listeners;
 
-    private StreamReadingWorker streamReadingWorker;
-    private QueueReadingWorker queueReadingWorker;
+    private StreamToEventReader streamToEventReader;
 
     public EverquestLogParser(File file, Mode mode) throws IOException {
-        switch(mode) {
-            case Full:
-                logInputStream = new FileInputStream(file);
-                break;
-            case Tail:
-                logInputStream = new TailInputStream(file, false);
-                break;
-            default:
-                throw new IllegalArgumentException("Unexpected mode: " + mode);
-        }
         listeners = ConcurrentHashMap.newKeySet();
-        rawInputQueue = new ConcurrentLinkedQueue<>();
-        streamReadingWorker = new StreamReadingWorker(logInputStream, rawInputQueue);
-        queueReadingWorker = new QueueReadingWorker(rawInputQueue, listeners);
-        Thread queueReaderThread = new Thread(queueReadingWorker);
-        queueReaderThread.start();
-        Thread streamReaderThread = new Thread(streamReadingWorker);
-        streamReaderThread.start();
+        streamToEventReader = new StreamToEventReader(file, mode, listeners);
     }
 
     public void start() {
-        Thread queueReaderThread = new Thread(queueReadingWorker);
+        Thread queueReaderThread = new Thread(streamToEventReader);
         queueReaderThread.start();
-        Thread streamReaderThread = new Thread(streamReadingWorker);
-        streamReaderThread.start();
     }
 
     /**
@@ -116,66 +94,26 @@ public class EverquestLogParser implements Closeable {
     }
 
     /**
-     * Reads raw content from the logInputStream and enqueues it for the
-     * QueueReadingWorker.
-     */
-    private static class StreamReadingWorker implements Runnable {
-
-        private InputStream logInputStream;
-        private final ConcurrentLinkedQueue<String> rawInputQueue;
-        private boolean stop = false;
-
-        public StreamReadingWorker(InputStream logInputStream, ConcurrentLinkedQueue<String> rawInputQueue){
-            this.logInputStream = logInputStream;
-            this.rawInputQueue = rawInputQueue;
-        }
-
-        /**
-         * When an object implementing interface <code>Runnable</code> is used
-         * to create a thread, starting the thread causes the object's
-         * <code>run</code> method to be called in that separately executing
-         * thread.
-         * <p>
-         * The general contract of the method <code>run</code> is that it may
-         * take any action whatsoever.
-         *
-         * @see Thread#run()
-         */
-        public void run() {
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(
-                            logInputStream
-                    )
-            );
-            while(!stop) {
-                try {
-                    rawInputQueue.add(reader.readLine());
-                    synchronized (rawInputQueue) {
-                        rawInputQueue.notifyAll();
-                    }
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        }
-
-        public void stop() {
-            stop = true;
-        }
-    }
-
-    /**
      * Reads raw content from the rawInputQueue and converts it into and fires
      * events.
      */
-    private static class QueueReadingWorker implements Runnable {
+    private static class StreamToEventReader implements Runnable {
 
-        private final ConcurrentLinkedQueue<String> rawInputQueue;
         private Set<LogEventListener> listeners;
         private boolean stop = false;
+        private InputStream logInputStream;
 
-        public QueueReadingWorker (ConcurrentLinkedQueue<String> rawInputQueue, Set<LogEventListener> listeners){
-            this.rawInputQueue = rawInputQueue;
+        public StreamToEventReader(File file, Mode mode, Set<LogEventListener> listeners) throws IOException {
+            switch(mode) {
+                case Full:
+                    logInputStream = new FileInputStream(file);
+                    break;
+                case Tail:
+                    logInputStream = new TailInputStream(file, false);
+                    break;
+                default:
+                    throw new IllegalArgumentException("Unexpected mode: " + mode);
+            }
             this.listeners = listeners;
         }
 
@@ -197,21 +135,56 @@ public class EverquestLogParser implements Closeable {
         public void run() {
             EventFactory logEventFactory = new EventFactory();
             while(!stop){
-                while(!rawInputQueue.isEmpty()) {
-                    String rawContent = rawInputQueue.poll();
+                String rawContent = null;
+                try {
+
+                    rawContent = readLine(logInputStream);
                     List<LogEvent> events = logEventFactory.parseLogString(rawContent);
-                    for(LogEvent event : events) {
+                    for (LogEvent event : events) {
                         broadcastEvent(event);
                     }
-                }
-                try {
-                    synchronized (rawInputQueue) {
-                        rawInputQueue.wait();
-                    }
-                } catch (InterruptedException e) {
+
+                } catch (IOException e) {
                     e.printStackTrace();
                 }
             }
+        }
+
+        private byte[] lineSeparatorBytes = System.lineSeparator().getBytes();
+        private byte[] readLineBuffer = new byte[8192];
+        private int lineLength = 0;
+
+        private String readLine(InputStream inputStream) throws IOException {
+            lineLength = 0;
+            while(
+                    !(
+                            bufferEndsWith(readLineBuffer, lineSeparatorBytes, lineLength)
+                            || readLineBuffer[lineLength] == (byte)-1
+                    )
+
+                    ) {
+                if(lineLength >= readLineBuffer.length){
+                    readLineBuffer = Arrays.copyOf(readLineBuffer, readLineBuffer.length * 2);
+                }
+                readLineBuffer[lineLength] = (byte)inputStream.read();
+                lineLength++;
+            }
+
+            int trimLength = bufferEndsWith(readLineBuffer, lineSeparatorBytes, lineLength) ? lineSeparatorBytes.length : 1;
+            return new String(readLineBuffer, 0, lineLength-trimLength);
+        }
+
+        private boolean bufferEndsWith(byte[] buffer, byte[] subarray, int bufferLength){
+            if(subarray.length > bufferLength){
+                return false;
+            }
+            int offset = bufferLength - subarray.length;
+            for (int i = 0; i < subarray.length; i++){
+                if(buffer[offset+i] != subarray[i]){
+                    return false;
+                }
+            }
+            return true;
         }
 
         private void broadcastEvent(LogEvent event){
@@ -313,6 +286,7 @@ public class EverquestLogParser implements Closeable {
 
         List<EventPatternFactory> eventPatternFactories = new ArrayList<>();
         EventPatternFactory unknownFactory;
+        String previousLine = "";
 
         public EventFactory() {
             eventPatternFactories.add(new LocationEventFactory());
@@ -324,23 +298,33 @@ public class EverquestLogParser implements Closeable {
             boolean handled = false;
             List<LogEvent> list = new ArrayList<>();
             for(EventPatternFactory eventPatternFactory : eventPatternFactories) {
-                if(eventPatternFactory.isMatch(logString)){
-                    try {
-                        list.add(eventPatternFactory.parseLogString(logString));
-                        handled = true;
-                    } catch (ParseException e) {
-                        e.printStackTrace(); //todo: Logging
+                try {
+                    if (eventPatternFactory.isMatch(logString)) {
+                        try {
+                            list.add(eventPatternFactory.parseLogString(logString));
+                            handled = true;
+                        } catch (Exception e) {
+                            System.err.println("Previous Line: " + previousLine);
+                            System.err.println("Failed parsing line: " + logString);
+                            e.printStackTrace(); //todo: Logging
+                        }
                     }
+                } catch (Exception e) {
+                    System.err.println("Previous Line: " + previousLine);
+                    System.err.println("Failed parsing line: " + logString);
+                    e.printStackTrace();
                 }
             }
             if(!handled) {
                 try {
                     list.add(unknownFactory.parseLogString(logString));
                 } catch (Exception e) {
+                    System.err.println("Previous Line: " + previousLine);
                     System.err.println("Failed parsing line: " + logString);
                     e.printStackTrace(); //todo: logging
                 }
             }
+            previousLine = logString;
             return list;
         }
 

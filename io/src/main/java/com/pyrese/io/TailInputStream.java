@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
+import java.util.Arrays;
 
 /**
  * A <code>TailInputStream</code> obtains input bytes
@@ -147,6 +148,36 @@ public class TailInputStream extends InputStream {
     @Override
     public int read(byte[] b, int off, int len) throws IOException {
         return tailPipeRead.read(b, off, len);
+    }
+
+    private byte[] lineSeparatorBytes = System.lineSeparator().getBytes();
+    private byte[] readLineBuffer = new byte[8192];
+    private int lineLength = 0;
+
+    public String readLine() throws IOException {
+        lineLength = 0;
+        while(!bufferEndsWith(readLineBuffer, lineSeparatorBytes, lineLength)) {
+            if(lineLength >= readLineBuffer.length){
+                readLineBuffer = Arrays.copyOf(readLineBuffer, readLineBuffer.length * 2);
+            }
+            readLineBuffer[lineLength] = (byte)read();
+            lineLength++;
+        }
+
+        return new String(readLineBuffer, 0, lineLength-lineSeparatorBytes.length);
+    }
+
+    private boolean bufferEndsWith(byte[] buffer, byte[] subarray, int bufferLength){
+        if(subarray.length > bufferLength){
+            return false;
+        }
+        int offset = bufferLength - subarray.length;
+        for (int i = 0; i < subarray.length; i++){
+            if(buffer[offset+i] != subarray[i]){
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

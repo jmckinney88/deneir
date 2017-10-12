@@ -17,8 +17,10 @@ import javafx.scene.text.Text;
 import javafx.stage.Stage;
 
 
+import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -39,7 +41,6 @@ public class Application extends javafx.application.Application{
         parser = new EverquestLogParser(file, EverquestLogParser.Mode.Tail);
         parser.registerEventListener(logEventListener);
         launch(args);
-
     }
 
     /**
@@ -81,7 +82,8 @@ public class Application extends javafx.application.Application{
         ); });
 
         logEventListener.addOnEnterZoneHandler((EnterZoneEvent event) -> {
-            zoneTxt.setText(event.getZoneName());
+            String newZone = event.getZoneName();
+            zoneTxt.setText(newZone);
         });
 
         parser.start();
