@@ -8,7 +8,7 @@ import java.util.Map;
 
 public class Spell {
 
-
+    private static final String DELIMITER = "^";
 
     private Map<Field, Object> values;
 
@@ -21,11 +21,30 @@ public class Spell {
     }
 
     public static Spell deserialize(String content){
-
+        String[] values = content.split("\\" + DELIMITER);
+        Field[] fields = Field.values();
+        Spell spell = new Spell();
+        for(int i = 0; i < values.length && i < fields.length; i++){
+            Field field = fields[i];
+            String strValue = values[i];
+            Object value = null;
+            if(field.fieldType.equals(Integer.class)){
+                value = Integer.valueOf(strValue);
+            } else {
+                value = strValue;
+            }
+            spell.values.put(field, value);
+        }
+        return spell;
     }
 
     public String serialize(){
-        return "";
+        StringBuilder stringBuilder = new StringBuilder();
+        for(Field field : Field.values()){
+            stringBuilder.append(values.get(field));
+            stringBuilder.append(DELIMITER);
+        }
+        return stringBuilder.substring(0, stringBuilder.length()-1);
     }
 
     /**
