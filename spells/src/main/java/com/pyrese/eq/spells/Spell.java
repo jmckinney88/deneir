@@ -1,6 +1,7 @@
 package com.pyrese.eq.spells;
 
 import lombok.Getter;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -29,9 +30,17 @@ public class Spell {
             String strValue = values[i];
             Object value = null;
             if(field.fieldType.equals(Integer.class)){
-                value = Integer.valueOf(strValue);
+                if(!StringUtils.isBlank(strValue)) {
+                    value = Integer.valueOf(strValue);
+                } else {
+                    value = field.defaultValue;
+                }
             } else {
-                value = strValue;
+                if(!StringUtils.isBlank(strValue)) {
+                    value = strValue;
+                } else {
+                    value = field.defaultValue;
+                }
             }
             spell.values.put(field, value);
         }
@@ -47,6 +56,10 @@ public class Spell {
         return stringBuilder.substring(0, stringBuilder.length()-1);
     }
 
+    public String toJson(){
+        return "";
+    }
+
     /**
      * There are 215 fields available in serialized Spell Data.
      */
@@ -58,7 +71,7 @@ public class Spell {
         YOU_CAST("you_cast", "The message sent to others when you cast the spell.", String.class, ""),
         OTHER_CASTS("other_casts", "The message seen when someone around you casts the spell.", String.class, ""),
         CAST_ON_YOU("cast_on_you", "The message received when the spell is cast on you.", String.class, ""),
-        CAST_ON_OTHER("cast_on_other", "unique id used to lookup the spell description in dbstr_us.txt in the Everquest Client", Integer.class, 0),
+        CAST_ON_OTHER("cast_on_other", "unique id used to lookup the spell description in dbstr_us.txt in the Everquest Client", String.class, ""),
         SPELL_FADES("spell_fades", "The message recieved when the spell fades.", String.class, ""),
         RANGE("range", "The range of the spell.", Integer.class, 100),
         AOE_RANGE("aoerange", "The range of the spell's area of effect if it is an area of effect spell.", Integer.class, 0),
@@ -116,6 +129,10 @@ public class Spell {
         COMPONENTS_2("components2", "The reagents necessary for the spell.", Integer.class, -1),
         COMPONENTS_3("components3", "The reagents necessary for the spell.", Integer.class, -1),
         COMPONENTS_4("components4", "The reagents necessary for the spell.", Integer.class, -1),
+        COMPONENT_COUNTS_1("component_counts1", "The amount of reagents used.", Integer.class, 1),
+        COMPONENT_COUNTS_2("component_counts2", "The amount of reagents used.", Integer.class, 1),
+        COMPONENT_COUNTS_3("component_counts3", "The amount of reagents used.", Integer.class, 1),
+        COMPONENT_COUNTS_4("component_counts4", "The amount of reagents used.", Integer.class, 1),
         NO_EXPEND_REAGENT_1("NoexpendReagent1", "If it is a number between 1-4 it means component number 1-4 is a focus and not to expend it.\n" +
                 "If it is a valid item ID it means this item is a focus as well.", Integer.class, -1),
         NO_EXPEND_REAGENT_2("NoexpendReagent2", "If it is a number between 1-4 it means component number 1-4 is a focus and not to expend it.\n" +
@@ -342,7 +359,7 @@ public class Spell {
         DEITIES_7("deities7", "The same as the deity list, except none for agnostic.", Integer.class, 0),
         /**
          * http://wiki.eqemulator.org/p?Deity_List&frm=spells_new
-         *
+         */
         DEITIES_8("deities8", "The same as the deity list, except none for agnostic.", Integer.class, 0),
         /**
          * http://wiki.eqemulator.org/p?Deity_List&frm=spells_new
@@ -505,6 +522,9 @@ public class Spell {
         ALLOW_REST("allowrest", "", Integer.class, 0),
         FIELD_213("field213", "unused field", Integer.class, 1),
         FIELD_214("field214", "unused field", Integer.class, 1),
+        // Below may be P99 specific?
+        EXPANSION("expansion", "expansion name or patch date check", String.class, ""),
+        ALTERNATE_SPELL_ID("field216", "ID to use if current expansion matches EXPANSION", Integer.class, 1)
         ;
 
         @Getter
